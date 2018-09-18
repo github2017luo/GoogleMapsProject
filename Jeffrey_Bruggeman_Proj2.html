@@ -1,0 +1,250 @@
+<!-- Jeffrey Bruggeman  --> 
+  <!--  Project 2  --> 
+  
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Street View side-by-side</title>
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      
+      #directions {
+        overflow:scroll;
+        text-align: right;
+        font-size: 14px;
+        font-family: Arial;
+        width: 25%; 
+        height: 50%; 
+        float: left;
+      }
+      
+      #placeWindow{
+        width: 25%; 
+        height: 50%; 
+        float: left;
+      }
+
+      #map {
+        width: 75%; 
+        height: 50%; 
+        float: left;
+      }
+      
+      #pano{
+        width: 75%; 
+        height: 50%; 
+        float: left;
+      }
+
+    </style>
+</head>
+<body>
+    <div id="placeWindow">
+      <br>
+      <br>
+      <input id="origin-input" class="controls" type="text"
+        placeholder="Enter an address">
+      <br>
+      <br>
+      <input id="place" class="controls" type="text"
+        placeholder="Enter a place">
+      <br>
+      <br>
+      <button type="button" id="button">Submit</button>
+      
+    </div>
+    <div id="map"></div>
+    <div id="directions"></div>
+    <div id="pano"></div>
+    <script>
+    // Global variables used in both initialize & other functions
+    var directionsService;
+    var directionsDisplay;
+    var atlanta = { lat: 33.754711, lng: -84.388068 };
+    var infoPane;
+    var map, panorama, trip, start;
+    var fusionStart, fusionEnd;
+    var placeService, placeSearch, placeNearby;
+    var latitude, longitude, loc;
+
+      // function that is handled though api's callback
+      function initialize() {
+        infoPane = new google.maps.InfoWindow();
+        // map
+        map = new google.maps.Map(document.getElementById('map'),{
+          center: atlanta,
+          zoom: 12
+        });
+        
+        // Directions display handlers
+        directionsDisplay = new google.maps.DirectionsRenderer;
+        directionsService = new google.maps.DirectionsService;
+        directionsDisplay.setMap(map);
+        directionsDisplay.setPanel(document.getElementById('directions'));
+        
+        // Original Streetview panorama creation
+        var panorama = new google.maps.StreetViewPanorama(
+          document.getElementById('pano'), {
+            position: atlanta,
+            pov: {
+              heading: 0,
+              pitch: 0
+            }
+          });
+        map.setStreetView(panorama);
+        
+        // Button click listener
+         
+        document.getElementById("button").addEventListener("click", function(){
+          // Create Places Service handler
+          placeService = new google.maps.places.PlacesService(map);   
+          // Grab text from place text boxs
+          placeSearch = document.getElementById('place').value;
+          placeNearby = document.getElementById('origin-input').value;
+          // check if address is empty, use atlanta in that case
+          if (placeNearby === "") {loc = atlanta;}
+          else{
+            // geocoder function to get lat and long of enetered address
+            var geocoder = new google.maps.Geocoder();
+            var address = document.getElementById('origin-input').value;
+            var loc;
+            geocoder.geocode({ 'address': address }, function (results, status) {
+                if (status === google.maps.GeocoderStatus.OK) {
+                    latitude = results[0].geometry.location.lat();
+                    longitude = results[0].geometry.location.lng();
+                }
+                loc = new google.maps.LatLng(latitude, longitude);
+            });
+          }
+          
+          // Had to wait for a half a second because the wait for the geocoder was messing up the search
+          // If your ping to google is longer than 500 ms the program will get an error as is.
+          // Asks the callback function to create the markers based on location, radius and search name
+          setTimeout(function(){
+            map.setCenter(loc);
+            map.setZoom(12);
+            placeService.nearbySearch({
+                location: loc,
+                radius: 5000,
+                name: placeSearch
+            }, callback);
+          }, 500);
+        });
+        
+        // Fusion table: from: '1FjVvT2lxm_meECyU7Mn1TaZOvvwu3rJnpZztPqvr'
+        // https://fusiontables.google.com/data?docid=1FjVvT2lxm_meECyU7Mn1TaZOvvwu3rJnpZztPqvr#rows:id=1
+        // Grabs fustion table info and uses that to make the fusion layer markers
+        var fusionLayer = new google.maps.FusionTablesLayer({
+          query: {
+            select: 'Geocodable address',
+            from: '1FjVvT2lxm_meECyU7Mn1TaZOvvwu3rJnpZztPqvr'
+            },
+            // suppress the default info windows that list ALL the row's info
+            suppressInfoWindows: true
+        });
+        
+        fusionLayer.setMap(map);
+
+        // fusion layer listener for clicking. Re-instantiated the panorama because I couldn't get the
+        // position to change otherwise.
+        infoPane = new google.maps.InfoWindow();
+        fusionLayer.addListener('click', function (event) {
+          // info displayed in the info window on click
+          var paneString = '<h3>' + event.row.Name.value + '</h3>' + event.row.Address.value;
+          infoPane.setPosition(event.latLng);
+          infoPane.setContent(paneString);
+          infoPane.open(map);
+
+          // pano set to click location for fusion layer elements
+          panorama = new google.maps.StreetViewPanorama(
+          document.getElementById('pano'), {
+            position: event.latLng,
+            pov: {
+              heading: 0,
+              pitch: 0
+            }
+          });
+          map.setStreetView(panorama);
+
+          // grabbing info from fusion layer to send into dirStatus function that will handle trip displaying
+          fusionStart = document.getElementById('origin-input').value;
+          if (fusionStart === "") {fusionStart = atlanta;}
+				  fusionEnd = event.latLng;
+				  trip = {
+            origin: fusionStart,
+            destination: fusionEnd,
+            travelMode: google.maps.TravelMode.DRIVING
+          };
+
+          dirStatus(trip);
+        });
+
+        // Link the Fusion Table layer with the map. 
+        fusionLayer.setMap(map);
+      }
+
+      // Checks status of directions, sends over to 
+      function dirStatus(trip) {
+        directionsService.route(trip, function (response, status) {
+          if (status == google.maps.DirectionsStatus.OK) {
+                  directionsDisplay.setDirections(response);
+          }
+        });
+      }
+
+      // Makes a call to createMarker for each result from places service
+      function callback(results, status) {
+        if (status === google.maps.places.PlacesServiceStatus.OK) {
+          for (var i = 0; i < results.length; i++) {
+            createMarker(results[i]);
+          }
+        }
+      }
+
+      // Actually creates the markers on the map
+      function createMarker(place) {
+        //var placeLoc = place.geometry.location;
+        var marker = new google.maps.Marker({
+          map: map,
+          position: place.geometry.location
+        });
+
+        // Listener for clicks on the markers made by google places.
+        google.maps.event.addListener(marker, 'click', function() {
+          infoPane.setContent(place.name);
+          infoPane.open(map, this);
+          
+          panorama = new google.maps.StreetViewPanorama(
+          document.getElementById('pano'), {
+            position: place.geometry.location,
+            pov: {
+              heading: 0,
+              pitch: 0
+            }
+          });
+          map.setStreetView(panorama);
+
+          // Populates the trip var to feed into the dirStatus function to create directions
+          // and map the trip.
+          var placesStart = document.getElementById('origin-input').value;
+          if (placesStart === "") {placesStart = atlanta;}
+          var placesEnd = place.latLng;
+          var trip = {
+            origin: placesStart,
+            destination: place.geometry.location,
+            travelMode: google.maps.TravelMode.DRIVING
+          };
+        dirStatus(trip);
+        });
+      }
+    </script>
+    <script async defer
+        src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDCGsb3YabK4wGR7Ryx9t7dwbtu9YeC0Pw&libraries=places&callback=initialize">
+    </script>
+</body>
+</html>
